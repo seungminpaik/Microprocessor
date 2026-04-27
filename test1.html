@@ -1,0 +1,245 @@
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pose + FaceMesh Posture App</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+
+  <style>
+    body {
+      margin: 0;
+      background: #0f172a;
+      color: white;
+      text-align: center;
+      font-family: Arial;
+    }
+
+    h1 { margin: 20px; }
+
+    video { display: none; }
+
+    canvas {
+      width: 640px;
+      border-radius: 20px;
+    }
+
+    .container {
+      position: relative;
+      display: inline-block;
+    }
+
+    .overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .card {
+      background: rgba(0,0,0,0.6);
+      padding: 10px 15px;
+      border-radius: 12px;
+    }
+
+    .good { color: #22c55e; }
+    .bad { color: #ef4444; }
+  </style>
+</head>
+
+<body>
+
+<h1>🧍 Posture AI (Pose + FaceMesh)</h1>
+
+<div class="container">
+  <video id="video" autoplay></video>
+  <canvas id="canvas" width="640" height="480"></canvas>
+
+  <div class="overlay">
+    <div id="status" class="card">분석 중...</div>
+    <div id="score" class="card">100</div>
+  </div>
+</div>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const statusText = document.getElementById('status');
+const scoreText = document.getElementById('score');
+
+let poseLandmarks = null;
+let faceLandmarks = null;
+let badTime = 0;
+
+// 카메라
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(stream => video.srcObject = stream);
+
+// ===== Pose =====
+const pose = new Pose({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+});
+
+pose.setOptions({
+  modelComplexity: 0,
+  smoothLandmarks: true
+});
+
+pose.onResults(res => {
+  poseLandmarks = res.poseLandmarks;
+});
+
+// ===== FaceMesh =====
+const faceMesh = new FaceMesh({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+});
+
+faceMesh.setOptions({
+  maxNumFaces: 1,
+  refineLandmarks: true
+});
+
+faceMesh.onResults(res => {
+  faceLandmarks = res.multiFaceLandmarks[0];
+});
+
+// ===== 좌표 변환 =====
+function px(p) {
+  return {
+    x: p.x * canvas.width,
+    y: p.y * canvas.height
+  };
+}
+
+// ===== 그리기 =====
+function drawLine(a, b, color) {
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+}
+
+function drawPoint(p, color) {
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+// ===== 메인 루프 =====
+async function render() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+  if (poseLandmarks && faceLandmarks) {
+
+    // ===== 얼굴 =====
+    const leftEye = px(faceLandmarks[33]);
+    const rightEye = px(faceLandmarks[263]);
+    const nose = px(faceLandmarks[1]);
+    const chin = px(faceLandmarks[152]);
+
+    const eyeCenter = {
+      x: (leftEye.x + rightEye.x)/2,
+      y: (leftEye.y + rightEye.y)/2
+    };
+
+    // ===== 어깨 =====
+    const ls = px(poseLandmarks[11]);
+    const rs = px(poseLandmarks[12]);
+
+    const shoulderCenter = {
+      x: (ls.x + rs.x)/2,
+      y: (ls.y + rs.y)/2
+    };
+
+    // ===== 시각화 =====
+    drawLine(leftEye, rightEye, "yellow");
+    drawLine(eyeCenter, chin, "red");
+    drawLine(ls, rs, "blue");
+
+    drawPoint(leftEye, "yellow");
+    drawPoint(rightEye, "yellow");
+    drawPoint(chin, "red");
+
+    // ===== 각도 계산 =====
+    const eyeAngle = Math.atan2(
+      rightEye.y - leftEye.y,
+      rightEye.x - leftEye.x
+    ) * (180/Math.PI);
+
+    const faceAngle = Math.atan2(
+      chin.y - eyeCenter.y,
+      chin.x - eyeCenter.x
+    ) * (180/Math.PI);
+
+    // ===== 점수 =====
+    let badScore = 0;
+    let message = "좋은 자세 👍";
+
+    if (Math.abs(eyeAngle) > 8) {
+      badScore += 30;
+      message = "⚠️ 머리 기울어짐";
+    }
+
+    if (Math.abs(faceAngle - 90) > 10) {
+      badScore += 30;
+      message = "⚠️ 고개 방향 이상";
+    }
+
+    if (Math.abs(ls.y - rs.y)/canvas.height > 0.04) {
+      badScore += 30;
+      message = "⚠️ 어깨 기울어짐";
+    }
+
+    let score = Math.max(0, 100 - badScore);
+    scoreText.innerText = score;
+
+    let isBad = score < 70;
+
+    if (isBad) {
+      badTime++;
+      statusText.className = "card bad";
+    } else {
+      badTime = 0;
+      statusText.className = "card good";
+      message = "좋은 자세 👍";
+    }
+
+    if (badTime > 40) {
+      message = "🚨 자세 교정하세요!";
+      new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg").play();
+      badTime = 0;
+    }
+
+    statusText.innerText = message;
+  }
+
+  requestAnimationFrame(render);
+}
+
+// ===== 카메라 루프 =====
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await pose.send({ image: video });
+    await faceMesh.send({ image: video });
+  },
+  width: 640,
+  height: 480
+});
+
+camera.start();
+render();
+</script>
+
+</body>
+</html>
+```
