@@ -1,149 +1,587 @@
-// ===============================
-// Arduino posture feedback system - 5 states
-//
-// EXCELLENT -> 매우 준수: 초록 LED
-// GOOD      -> 준수: 초록 LED
-// NORMAL    -> 보통: 노란 LED
-// BAD       -> 불량: 빨간 LED + 약한 경고음 + 중간 진동
-// VERY_BAD  -> 매우 불량: 빨간 LED + 강한 경고음 + 강한 진동
-// ===============================
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>자세교정 Arduino 연동 프로그램</title>
 
-// LED 핀
-const int GREEN_LED  = 8;
-const int YELLOW_LED = 9;
-const int RED_LED    = 10;
-
-// 부저 핀
-const int BUZZER_PIN = 11;
-
-// 모터 제어 핀
-// PWM 가능한 핀 권장: 3, 5, 6, 9, 10, 11
-const int MOTOR_PIN  = 6;
-
-// 현재 자세 상태
-String postureState = "GOOD";
-
-// 경고 타이밍 제어용
-unsigned long lastActionTime = 0;
-bool toggleState = false;
-
-void setup() {
-  Serial.begin(9600);
-
-  pinMode(GREEN_LED, OUTPUT);
-  pinMode(YELLOW_LED, OUTPUT);
-  pinMode(RED_LED, OUTPUT);
-
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(MOTOR_PIN, OUTPUT);
-
-  setGood();
-}
-
-void loop() {
-  if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-
-    if (
-      cmd == "EXCELLENT" ||
-      cmd == "GOOD" ||
-      cmd == "NORMAL" ||
-      cmd == "BAD" ||
-      cmd == "VERY_BAD"
-    ) {
-      postureState = cmd;
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: white;
+      text-align: center;
     }
-  }
 
-  if (postureState == "EXCELLENT") {
-    setExcellent();
-  } 
-  else if (postureState == "GOOD") {
-    setGood();
-  } 
-  else if (postureState == "NORMAL") {
-    setNormal();
-  } 
-  else if (postureState == "BAD") {
-    setBad();
-  } 
-  else if (postureState == "VERY_BAD") {
-    setVeryBad();
-  }
-}
-
-// 매우 준수
-void setExcellent() {
-  digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(YELLOW_LED, LOW);
-  digitalWrite(RED_LED, LOW);
-
-  noTone(BUZZER_PIN);
-  analogWrite(MOTOR_PIN, 0);
-}
-
-// 준수
-void setGood() {
-  digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(YELLOW_LED, LOW);
-  digitalWrite(RED_LED, LOW);
-
-  noTone(BUZZER_PIN);
-  analogWrite(MOTOR_PIN, 0);
-}
-
-// 보통
-void setNormal() {
-  digitalWrite(GREEN_LED, LOW);
-  digitalWrite(YELLOW_LED, HIGH);
-  digitalWrite(RED_LED, LOW);
-
-  noTone(BUZZER_PIN);
-  analogWrite(MOTOR_PIN, 0);
-}
-
-// 불량
-void setBad() {
-  digitalWrite(GREEN_LED, LOW);
-  digitalWrite(YELLOW_LED, LOW);
-  digitalWrite(RED_LED, HIGH);
-
-  unsigned long now = millis();
-
-  // 0.8초마다 약한 경고
-  if (now - lastActionTime >= 800) {
-    lastActionTime = now;
-
-    tone(BUZZER_PIN, 1400, 150);
-    analogWrite(MOTOR_PIN, 130);
-
-    delay(150);
-
-    analogWrite(MOTOR_PIN, 0);
-    noTone(BUZZER_PIN);
-  }
-}
-
-// 매우 불량
-void setVeryBad() {
-  digitalWrite(GREEN_LED, LOW);
-  digitalWrite(YELLOW_LED, LOW);
-  digitalWrite(RED_LED, HIGH);
-
-  unsigned long now = millis();
-
-  // 0.25초마다 강한 경고
-  if (now - lastActionTime >= 250) {
-    lastActionTime = now;
-    toggleState = !toggleState;
-
-    if (toggleState) {
-      tone(BUZZER_PIN, 2300);
-      analogWrite(MOTOR_PIN, 255);
-    } else {
-      noTone(BUZZER_PIN);
-      analogWrite(MOTOR_PIN, 0);
+    h1 {
+      margin-top: 20px;
+      font-size: 28px;
     }
-  }
-}
+
+    #container {
+      position: relative;
+      width: 960px;
+      height: 720px;
+      margin: 20px auto;
+      border-radius: 20px;
+      overflow: hidden;
+      background: black;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+    }
+
+    video, canvas {
+      position: absolute;
+      width: 960px;
+      height: 720px;
+      left: 0;
+      top: 0;
+      transform: scaleX(-1);
+    }
+
+    #infoPanel {
+      width: 900px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #1f2937;
+      border-radius: 16px;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
+    }
+
+    #scoreText {
+      font-size: 30px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    #stateText {
+      font-size: 30px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    #detailText {
+      font-size: 18px;
+      color: #d1d5db;
+      line-height: 1.6;
+    }
+
+    button {
+      padding: 12px 22px;
+      font-size: 18px;
+      border: none;
+      border-radius: 10px;
+      margin: 8px;
+      cursor: pointer;
+      background: #2563eb;
+      color: white;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    #arduinoStatus {
+      margin-top: 10px;
+      font-size: 18px;
+      color: #facc15;
+    }
+
+    .excellent {
+      color: #4ade80;
+    }
+
+    .good {
+      color: #22c55e;
+    }
+
+    .normal {
+      color: #facc15;
+    }
+
+    .bad {
+      color: #fb923c;
+    }
+
+    .very-bad {
+      color: #ef4444;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>웹캠 자세교정 + Arduino 피드백 시스템</h1>
+
+  <div>
+    <button id="connectArduinoBtn">Arduino 연결</button>
+    <button id="startBtn">카메라 시작</button>
+    <div id="arduinoStatus">Arduino 연결 안 됨</div>
+  </div>
+
+  <div id="container">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="infoPanel">
+    <div id="scoreText">자세 점수: -</div>
+    <div id="stateText">상태: 대기 중</div>
+    <div id="detailText">
+      카메라를 시작하고 Arduino를 연결하면 자세 상태에 따라 LED, 부저, 모터가 작동합니다.
+    </div>
+  </div>
+
+  <!-- MediaPipe 라이브러리 -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    // ===============================
+    // HTML 요소
+    // ===============================
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const scoreText = document.getElementById("scoreText");
+    const stateText = document.getElementById("stateText");
+    const detailText = document.getElementById("detailText");
+    const arduinoStatus = document.getElementById("arduinoStatus");
+
+    canvas.width = 960;
+    canvas.height = 720;
+
+    // ===============================
+    // Arduino Serial 변수
+    // ===============================
+    let port = null;
+    let writer = null;
+    let lastSentState = "";
+
+    // ===============================
+    // MediaPipe 결과 저장
+    // ===============================
+    let latestPoseLandmarks = null;
+    let latestFaceLandmarks = null;
+
+    // ===============================
+    // Arduino 연결
+    // ===============================
+    document.getElementById("connectArduinoBtn").addEventListener("click", async () => {
+      try {
+        if (!("serial" in navigator)) {
+          alert("이 브라우저는 Web Serial API를 지원하지 않습니다. Chrome 또는 Edge를 사용하세요.");
+          return;
+        }
+
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+
+        const textEncoder = new TextEncoderStream();
+        textEncoder.readable.pipeTo(port.writable);
+        writer = textEncoder.writable.getWriter();
+
+        arduinoStatus.textContent = "Arduino 연결 완료";
+        arduinoStatus.style.color = "#22c55e";
+
+        console.log("Arduino 연결 완료");
+      } catch (err) {
+        console.error("Arduino 연결 실패:", err);
+        arduinoStatus.textContent = "Arduino 연결 실패";
+        arduinoStatus.style.color = "#ef4444";
+      }
+    });
+
+    // ===============================
+    // Arduino로 자세 상태 전송
+    // ===============================
+    async function sendPostureState(state) {
+      if (!writer) return;
+
+      if (state === lastSentState) return;
+
+      lastSentState = state;
+
+      try {
+        await writer.write(state + "\n");
+        console.log("Arduino 전송:", state);
+      } catch (err) {
+        console.error("Arduino 전송 실패:", err);
+      }
+    }
+
+    // ===============================
+    // 일반 각도 계산
+    // ===============================
+    function getAngleDegree(p1, p2) {
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      return Math.atan2(dy, dx) * 180 / Math.PI;
+    }
+
+    // ===============================
+    // 수평 기준 기울기 계산
+    // 0도와 180도 모두 수평으로 처리
+    // 예: 178도 -> 2도
+    // ===============================
+    function getHorizontalTiltDegree(p1, p2) {
+      const angle = getAngleDegree(p1, p2);
+      let tilt = Math.abs(angle);
+
+      if (tilt > 90) {
+        tilt = 180 - tilt;
+      }
+
+      return tilt;
+    }
+
+    // ===============================
+    // 점 그리기
+    // ===============================
+    function drawPoint(point, color, radius = 6) {
+      ctx.beginPath();
+      ctx.arc(point.x * canvas.width, point.y * canvas.height, radius, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    // ===============================
+    // 선 그리기
+    // ===============================
+    function drawLine(p1, p2, color, width = 4) {
+      ctx.beginPath();
+      ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
+      ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    }
+
+    // ===============================
+    // 점수에 따른 5단계 상태 분류
+    //
+    // 0 ~ 19   : 매우 불량
+    // 20 ~ 39  : 불량
+    // 40 ~ 59  : 보통
+    // 60 ~ 79  : 준수
+    // 80 ~ 100 : 매우 준수
+    // ===============================
+    function classifyPosture(score) {
+      if (score >= 80) {
+        return {
+          state: "EXCELLENT",
+          label: "매우 준수",
+          className: "excellent"
+        };
+      } else if (score >= 60) {
+        return {
+          state: "GOOD",
+          label: "준수",
+          className: "good"
+        };
+      } else if (score >= 40) {
+        return {
+          state: "NORMAL",
+          label: "보통",
+          className: "normal"
+        };
+      } else if (score >= 20) {
+        return {
+          state: "BAD",
+          label: "불량",
+          className: "bad"
+        };
+      } else {
+        return {
+          state: "VERY_BAD",
+          label: "매우 불량",
+          className: "very-bad"
+        };
+      }
+    }
+
+    // ===============================
+    // 자세 분석
+    // 점수 보정 없이 0~100 점수 그대로 사용
+    // ===============================
+    function analyzePosture() {
+      if (!latestPoseLandmarks) {
+        return {
+          score: 0,
+          state: "VERY_BAD",
+          label: "매우 불량",
+          className: "very-bad",
+          message: "사람이 감지되지 않았습니다.",
+          shoulderTilt: "-",
+          bodyLean: "-",
+          headTilt: "-"
+        };
+      }
+
+      const leftShoulder = latestPoseLandmarks[11];
+      const rightShoulder = latestPoseLandmarks[12];
+      const leftHip = latestPoseLandmarks[23];
+      const rightHip = latestPoseLandmarks[24];
+
+      let score = 100;
+      let messages = [];
+
+      // -------------------------------
+      // 1. 어깨 기울기 측정
+      // 8도 이하 양호
+      // 8~16도 살짝 틀어짐
+      // 16도 초과 불량
+      // -------------------------------
+      const shoulderTilt = getHorizontalTiltDegree(leftShoulder, rightShoulder);
+
+      if (shoulderTilt > 16) {
+        score -= 25;
+        messages.push("어깨 기울어짐이 큽니다.");
+      } else if (shoulderTilt > 8) {
+        score -= 10;
+        messages.push("어깨가 살짝 기울어졌습니다.");
+      }
+
+      // -------------------------------
+      // 2. 몸 중심 기울기 측정
+      // 0.06 이하 양호
+      // 0.06~0.11 살짝 틀어짐
+      // 0.11 초과 불량
+      // -------------------------------
+      const shoulderCenter = {
+        x: (leftShoulder.x + rightShoulder.x) / 2,
+        y: (leftShoulder.y + rightShoulder.y) / 2
+      };
+
+      const hipCenter = {
+        x: (leftHip.x + rightHip.x) / 2,
+        y: (leftHip.y + rightHip.y) / 2
+      };
+
+      const bodyLean = Math.abs(shoulderCenter.x - hipCenter.x);
+
+      if (bodyLean > 0.11) {
+        score -= 25;
+        messages.push("상체가 한쪽으로 많이 기울었습니다.");
+      } else if (bodyLean > 0.06) {
+        score -= 10;
+        messages.push("상체가 살짝 기울었습니다.");
+      }
+
+      // -------------------------------
+      // 3. 머리 기울기 측정
+      // 9도 이하 양호
+      // 9~16도 살짝 틀어짐
+      // 16도 초과 불량
+      // -------------------------------
+      let headTilt = 0;
+
+      if (latestFaceLandmarks) {
+        const leftEye = latestFaceLandmarks[33];
+        const rightEye = latestFaceLandmarks[263];
+
+        headTilt = getHorizontalTiltDegree(leftEye, rightEye);
+
+        if (headTilt > 16) {
+          score -= 20;
+          messages.push("머리가 많이 기울었습니다.");
+        } else if (headTilt > 9) {
+          score -= 8;
+          messages.push("머리가 살짝 기울었습니다.");
+        }
+      }
+
+      // -------------------------------
+      // 점수 보정 없음
+      // 0~100 범위만 제한
+      // -------------------------------
+      score = Math.max(0, Math.min(100, Math.round(score)));
+
+      const result = classifyPosture(score);
+
+      if (messages.length === 0) {
+        if (result.state === "EXCELLENT") {
+          messages.push("자세가 매우 안정적입니다.");
+        } else if (result.state === "GOOD") {
+          messages.push("자세가 준수합니다.");
+        } else if (result.state === "NORMAL") {
+          messages.push("자세가 보통 수준입니다.");
+        } else if (result.state === "BAD") {
+          messages.push("자세가 불량합니다.");
+        } else {
+          messages.push("자세가 매우 불량합니다.");
+        }
+      }
+
+      return {
+        score,
+        state: result.state,
+        label: result.label,
+        className: result.className,
+        message: messages.join(" "),
+        shoulderTilt: shoulderTilt.toFixed(1),
+        bodyLean: bodyLean.toFixed(3),
+        headTilt: headTilt.toFixed(1)
+      };
+    }
+
+    // ===============================
+    // UI 업데이트
+    // ===============================
+    function updateUI(result) {
+      scoreText.textContent = `자세 점수: ${result.score}`;
+
+      stateText.textContent = `상태: ${result.label}`;
+      stateText.className = result.className;
+
+      detailText.innerHTML = `
+        ${result.message}<br>
+        어깨 기울기: ${result.shoulderTilt}도<br>
+        몸 중심 기울기: ${result.bodyLean}<br>
+        머리 기울기: ${result.headTilt}도
+      `;
+    }
+
+    // ===============================
+    // Pose 결과 처리
+    // ===============================
+    function onPoseResults(results) {
+      latestPoseLandmarks = results.poseLandmarks || null;
+      drawEverything();
+    }
+
+    // ===============================
+    // FaceMesh 결과 처리
+    // ===============================
+    function onFaceResults(results) {
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        latestFaceLandmarks = results.multiFaceLandmarks[0];
+      } else {
+        latestFaceLandmarks = null;
+      }
+    }
+
+    // ===============================
+    // 화면 그리기
+    // ===============================
+    function drawEverything() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!latestPoseLandmarks) {
+        const result = analyzePosture();
+        updateUI(result);
+        sendPostureState(result.state);
+        return;
+      }
+
+      const leftShoulder = latestPoseLandmarks[11];
+      const rightShoulder = latestPoseLandmarks[12];
+      const leftHip = latestPoseLandmarks[23];
+      const rightHip = latestPoseLandmarks[24];
+
+      const shoulderCenter = {
+        x: (leftShoulder.x + rightShoulder.x) / 2,
+        y: (leftShoulder.y + rightShoulder.y) / 2
+      };
+
+      const hipCenter = {
+        x: (leftHip.x + rightHip.x) / 2,
+        y: (leftHip.y + rightHip.y) / 2
+      };
+
+      // 어깨 선
+      drawLine(leftShoulder, rightShoulder, "#38bdf8", 5);
+
+      // 몸 중심 선
+      drawLine(shoulderCenter, hipCenter, "#a78bfa", 5);
+
+      // 포인트
+      drawPoint(leftShoulder, "#22c55e");
+      drawPoint(rightShoulder, "#22c55e");
+      drawPoint(leftHip, "#facc15");
+      drawPoint(rightHip, "#facc15");
+      drawPoint(shoulderCenter, "#ffffff");
+      drawPoint(hipCenter, "#ffffff");
+
+      // 얼굴 기준선
+      if (latestFaceLandmarks) {
+        const leftEye = latestFaceLandmarks[33];
+        const rightEye = latestFaceLandmarks[263];
+        const nose = latestFaceLandmarks[1];
+        const chin = latestFaceLandmarks[152];
+
+        drawLine(leftEye, rightEye, "#ef4444", 4);
+        drawLine(nose, chin, "#fb7185", 3);
+
+        drawPoint(leftEye, "#ef4444");
+        drawPoint(rightEye, "#ef4444");
+        drawPoint(nose, "#ffffff");
+        drawPoint(chin, "#ffffff");
+      }
+
+      const result = analyzePosture();
+      updateUI(result);
+      sendPostureState(result.state);
+    }
+
+    // ===============================
+    // MediaPipe Pose 설정
+    // ===============================
+    const pose = new Pose({
+      locateFile: file => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+      }
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults(onPoseResults);
+
+    // ===============================
+    // MediaPipe FaceMesh 설정
+    // ===============================
+    const faceMesh = new FaceMesh({
+      locateFile: file => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+      }
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults(onFaceResults);
+
+    // ===============================
+    // 카메라 시작
+    // ===============================
+    document.getElementById("startBtn").addEventListener("click", async () => {
+      try {
+        const camera = new Camera(video, {
+          onFrame: async () => {
+            await pose.send({ image: video });
+            await faceMesh.send({ image: video });
+          },
+          width: 960,
+          height: 720
+        });
+
+        camera.start();
+      } catch (err) {
+        console.error("카메라 시작 실패:", err);
+        alert("카메라를 시작할 수 없습니다. 카메라 권한을 확인하세요.");
+      }
+    });
+  </script>
+</body>
+</html>
