@@ -1,9 +1,11 @@
-
 // ===============================
-// Arduino posture feedback system
-// GOOD  -> 초록 LED
-// WARN  -> 노란 LED + 약한 부저 + 약한 진동
-// BAD   -> 빨간 LED + 강한 부저 + 강한 진동
+// Arduino posture feedback system - 5 states
+//
+// EXCELLENT -> 매우 준수: 초록 LED
+// GOOD      -> 준수: 초록 LED
+// NORMAL    -> 보통: 노란 LED
+// BAD       -> 불량: 빨간 LED + 약한 경고음 + 중간 진동
+// VERY_BAD  -> 매우 불량: 빨간 LED + 강한 경고음 + 강한 진동
 // ===============================
 
 // LED 핀
@@ -23,7 +25,7 @@ String postureState = "GOOD";
 
 // 경고 타이밍 제어용
 unsigned long lastActionTime = 0;
-bool badToggle = false;
+bool toggleState = false;
 
 void setup() {
   Serial.begin(9600);
@@ -39,30 +41,49 @@ void setup() {
 }
 
 void loop() {
-  // 웹에서 들어온 시리얼 명령 읽기
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd == "GOOD" || cmd == "WARN" || cmd == "BAD") {
+    if (
+      cmd == "EXCELLENT" ||
+      cmd == "GOOD" ||
+      cmd == "NORMAL" ||
+      cmd == "BAD" ||
+      cmd == "VERY_BAD"
+    ) {
       postureState = cmd;
     }
   }
 
-  if (postureState == "GOOD") {
+  if (postureState == "EXCELLENT") {
+    setExcellent();
+  } 
+  else if (postureState == "GOOD") {
     setGood();
   } 
-  else if (postureState == "WARN") {
-    setWarn();
+  else if (postureState == "NORMAL") {
+    setNormal();
   } 
   else if (postureState == "BAD") {
     setBad();
+  } 
+  else if (postureState == "VERY_BAD") {
+    setVeryBad();
   }
 }
 
-// -------------------------------
-// 자세 양호
-// -------------------------------
+// 매우 준수
+void setExcellent() {
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(YELLOW_LED, LOW);
+  digitalWrite(RED_LED, LOW);
+
+  noTone(BUZZER_PIN);
+  analogWrite(MOTOR_PIN, 0);
+}
+
+// 준수
 void setGood() {
   digitalWrite(GREEN_LED, HIGH);
   digitalWrite(YELLOW_LED, LOW);
@@ -72,35 +93,17 @@ void setGood() {
   analogWrite(MOTOR_PIN, 0);
 }
 
-// -------------------------------
-// 자세 살짝 불량
-// 노란 LED + 약한 경고음 + 약한 진동
-// -------------------------------
-void setWarn() {
+// 보통
+void setNormal() {
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(YELLOW_LED, HIGH);
   digitalWrite(RED_LED, LOW);
 
-  unsigned long now = millis();
-
-  // 1초마다 짧게 경고
-  if (now - lastActionTime >= 1000) {
-    lastActionTime = now;
-
-    tone(BUZZER_PIN, 1200, 120);   // 약한 삐 소리
-    analogWrite(MOTOR_PIN, 90);    // 약한 진동
-
-    delay(120);
-
-    analogWrite(MOTOR_PIN, 0);
-    noTone(BUZZER_PIN);
-  }
+  noTone(BUZZER_PIN);
+  analogWrite(MOTOR_PIN, 0);
 }
 
-// -------------------------------
-// 자세 불량
-// 빨간 LED + 강한 경고음 + 강한 진동
-// -------------------------------
+// 불량
 void setBad() {
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(YELLOW_LED, LOW);
@@ -108,14 +111,36 @@ void setBad() {
 
   unsigned long now = millis();
 
-  // 0.3초마다 반복 경고
-  if (now - lastActionTime >= 300) {
+  // 0.8초마다 약한 경고
+  if (now - lastActionTime >= 800) {
     lastActionTime = now;
-    badToggle = !badToggle;
 
-    if (badToggle) {
-      tone(BUZZER_PIN, 2200);
-      analogWrite(MOTOR_PIN, 255);   // 강한 진동
+    tone(BUZZER_PIN, 1400, 150);
+    analogWrite(MOTOR_PIN, 130);
+
+    delay(150);
+
+    analogWrite(MOTOR_PIN, 0);
+    noTone(BUZZER_PIN);
+  }
+}
+
+// 매우 불량
+void setVeryBad() {
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(YELLOW_LED, LOW);
+  digitalWrite(RED_LED, HIGH);
+
+  unsigned long now = millis();
+
+  // 0.25초마다 강한 경고
+  if (now - lastActionTime >= 250) {
+    lastActionTime = now;
+    toggleState = !toggleState;
+
+    if (toggleState) {
+      tone(BUZZER_PIN, 2300);
+      analogWrite(MOTOR_PIN, 255);
     } else {
       noTone(BUZZER_PIN);
       analogWrite(MOTOR_PIN, 0);
