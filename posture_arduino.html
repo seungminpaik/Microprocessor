@@ -54,7 +54,7 @@
     }
 
     #stateText {
-      font-size: 26px;
+      font-size: 30px;
       font-weight: bold;
       margin-bottom: 10px;
     }
@@ -86,15 +86,23 @@
       color: #facc15;
     }
 
+    .excellent {
+      color: #4ade80;
+    }
+
     .good {
       color: #22c55e;
     }
 
-    .warn {
+    .normal {
       color: #facc15;
     }
 
     .bad {
+      color: #fb923c;
+    }
+
+    .very-bad {
       color: #ef4444;
     }
   </style>
@@ -143,12 +151,6 @@
 
     canvas.width = 960;
     canvas.height = 720;
-
-    // ===============================
-    // 점수 보정값
-    // 현재 계산된 점수에 +10점을 더함
-    // ===============================
-    const SCORE_BOOST = 10;
 
     // ===============================
     // Arduino Serial 변수
@@ -220,8 +222,7 @@
 
     // ===============================
     // 수평 기준 기울기 계산
-    // 170도   -> 10도
-    // 5도     -> 5도
+    // 0도와 180도 모두 수평으로 처리
     // ===============================
     function getHorizontalTiltDegree(p1, p2) {
       const angle = getAngleDegree(p1, p2);
@@ -232,6 +233,25 @@
       }
 
       return tilt;
+    }
+
+    // ===============================
+    // 점수 스케일 보정 함수
+    //
+    // 단순 +10점이 아니라,
+    // 원래 70~100점 구간을 80~100점 구간으로 재매핑함.
+    //
+    // 70점  -> 80점
+    // 85점  -> 90점
+    // 100점 -> 100점
+    // ===============================
+    function adjustScoreScale(rawScore) {
+      if (rawScore < 70) {
+        return rawScore;
+      }
+
+      const adjustedScore = 80 + ((rawScore - 70) * (20 / 30));
+      return adjustedScore;
     }
 
     // ===============================
@@ -257,14 +277,53 @@
     }
 
     // ===============================
+    // 점수에 따른 5단계 상태 분류
+    // ===============================
+    function classifyPosture(score) {
+      if (score >= 90) {
+        return {
+          state: "EXCELLENT",
+          label: "매우 준수",
+          className: "excellent"
+        };
+      } else if (score >= 80) {
+        return {
+          state: "GOOD",
+          label: "준수",
+          className: "good"
+        };
+      } else if (score >= 65) {
+        return {
+          state: "NORMAL",
+          label: "보통",
+          className: "normal"
+        };
+      } else if (score >= 45) {
+        return {
+          state: "BAD",
+          label: "불량",
+          className: "bad"
+        };
+      } else {
+        return {
+          state: "VERY_BAD",
+          label: "매우 불량",
+          className: "very-bad"
+        };
+      }
+    }
+
+    // ===============================
     // 자세 분석
-    // 180도 근처 수평 보정 + SCORE_BOOST 10 적용
+    // 180도 근처 수평 보정 + 점수 스케일 보정 + 5단계 분류
     // ===============================
     function analyzePosture() {
       if (!latestPoseLandmarks) {
         return {
           score: 0,
-          state: "BAD",
+          state: "VERY_BAD",
+          label: "매우 불량",
+          className: "very-bad",
           message: "사람이 감지되지 않았습니다.",
           shoulderTilt: "-",
           bodyLean: "-",
@@ -282,10 +341,6 @@
 
       // -------------------------------
       // 1. 어깨 기울기 측정
-      // 수정됨:
-      // 기존 Math.abs(angle) 대신 getHorizontalTiltDegree 사용
-      // 178.6도 같은 값은 1.4도로 보정됨
-      //
       // 8도 이하 양호
       // 8~16도 살짝 틀어짐
       // 16도 초과 불량
@@ -328,9 +383,6 @@
 
       // -------------------------------
       // 3. 머리 기울기 측정
-      // 수정됨:
-      // 눈 양끝 선도 180도 근처 수평 보정 적용
-      //
       // 9도 이하 양호
       // 9~16도 살짝 틀어짐
       // 16도 초과 불량
@@ -353,35 +405,29 @@
       }
 
       // -------------------------------
-      // 점수 보정
-      // 예: 원래 75점이면 최종 85점으로 표시
+      // 점수 스케일 보정
+      // 기존 70점 수준을 80점 수준으로 변환
       // -------------------------------
-      score = score + SCORE_BOOST;
+      score = adjustScoreScale(score);
       score = Math.max(0, Math.min(100, Math.round(score)));
 
-      // -------------------------------
-      // 최종 상태 판정
-      // GOOD 70 이상
-      // WARN 45 이상
-      // BAD 45 미만
-      // -------------------------------
-      let state = "GOOD";
-
-      if (score >= 70) {
-        state = "GOOD";
-      } else if (score >= 45) {
-        state = "WARN";
-      } else {
-        state = "BAD";
-      }
+      const result = classifyPosture(score);
 
       if (messages.length === 0) {
-        messages.push("자세가 준수합니다.");
+        if (result.state === "EXCELLENT") {
+          messages.push("자세가 매우 안정적입니다.");
+        } else if (result.state === "GOOD") {
+          messages.push("자세가 준수합니다.");
+        } else if (result.state === "NORMAL") {
+          messages.push("자세가 보통 수준입니다.");
+        }
       }
 
       return {
         score,
-        state,
+        state: result.state,
+        label: result.label,
+        className: result.className,
         message: messages.join(" "),
         shoulderTilt: shoulderTilt.toFixed(1),
         bodyLean: bodyLean.toFixed(3),
@@ -395,16 +441,8 @@
     function updateUI(result) {
       scoreText.textContent = `자세 점수: ${result.score}`;
 
-      if (result.state === "GOOD") {
-        stateText.textContent = "상태: 자세 준수";
-        stateText.className = "good";
-      } else if (result.state === "WARN") {
-        stateText.textContent = "상태: 자세 살짝 틀어짐";
-        stateText.className = "warn";
-      } else {
-        stateText.textContent = "상태: 자세 불량";
-        stateText.className = "bad";
-      }
+      stateText.textContent = `상태: ${result.label}`;
+      stateText.className = result.className;
 
       detailText.innerHTML = `
         ${result.message}<br>
