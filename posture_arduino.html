@@ -212,6 +212,10 @@
       return tilt;
     }
 
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
     function drawPoint(point, color, radius = 6) {
       ctx.beginPath();
       ctx.arc(point.x * canvas.width, point.y * canvas.height, radius, 0, Math.PI * 2);
@@ -228,26 +232,72 @@
       ctx.stroke();
     }
 
+    // ===============================
+    // 자세 점수 계산용 감점 함수
+    //
+    // 매우 준수는 거의 완전 정자세에서만 나오도록 설정.
+    // 눈으로도 많이 기울어진 자세는 60점 아래로 내려가기 쉽게 설정.
+    // ===============================
+
+    function shoulderPenalty(tilt) {
+      if (tilt <= 2) return 0;          // 거의 완전 수평
+      if (tilt <= 5) return 3;          // 매우 약한 기울기
+      if (tilt <= 8) return 8;          // 준수에서 약간 벗어남
+      if (tilt <= 12) return 16;        // 보통 수준
+      if (tilt <= 16) return 26;        // 불량에 가까움
+      if (tilt <= 22) return 38;        // 눈에 보이는 기울기
+      return 48;                        // 많이 기울어짐
+    }
+
+    function headPenalty(tilt) {
+      if (tilt <= 2) return 0;
+      if (tilt <= 5) return 3;
+      if (tilt <= 8) return 8;
+      if (tilt <= 12) return 15;
+      if (tilt <= 16) return 24;
+      if (tilt <= 22) return 34;
+      return 44;
+    }
+
+    function bodyLeanPenalty(lean) {
+      if (lean <= 0.015) return 0;      // 거의 정중앙
+      if (lean <= 0.030) return 3;
+      if (lean <= 0.050) return 8;
+      if (lean <= 0.075) return 16;
+      if (lean <= 0.100) return 26;
+      if (lean <= 0.140) return 38;
+      return 48;
+    }
+
+    // ===============================
+    // 점수에 따른 5단계 상태 분류
+    //
+    // 95 ~ 100 : 매우 준수
+    // 85 ~ 94  : 준수
+    // 70 ~ 84  : 보통
+    // 60 ~ 69  : 불량
+    // 0 ~ 59   : 매우 불량
+    // ===============================
     function classifyPosture(score) {
-      if (score >= 80) {
+      if (score >= 95) {
         return {
           state: "EXCELLENT",
           label: "매우 준수",
           className: "excellent"
         };
-      } else if (score >= 60) {
+      } else if (score >= 85) {
         return {
           state: "GOOD",
           label: "준수",
           className: "good"
         };
-      } else if (score >= 40) {
+      } else if (score >= 70) {
         return {
           state: "NORMAL",
           label: "보통",
           className: "normal"
         };
-      } else if (score >= 20) {
+      } else if (score >= 60) {
         return {
           state: "BAD",
           label: "불량",
@@ -260,6 +310,44 @@
           className: "very-bad"
         };
       }
+    }
+
+    function makeMessage(result, shoulderTilt, bodyLean, headTilt) {
+      const messages = [];
+
+      if (shoulderTilt > 16) {
+        messages.push("어깨가 눈에 띄게 기울어졌습니다.");
+      } else if (shoulderTilt > 8) {
+        messages.push("어깨가 약간 기울어졌습니다.");
+      }
+
+      if (bodyLean > 0.10) {
+        messages.push("상체가 한쪽으로 많이 치우쳤습니다.");
+      } else if (bodyLean > 0.05) {
+        messages.push("상체 중심이 약간 치우쳤습니다.");
+      }
+
+      if (headTilt > 16) {
+        messages.push("머리가 눈에 띄게 기울어졌습니다.");
+      } else if (headTilt > 8) {
+        messages.push("머리가 약간 기울어졌습니다.");
+      }
+
+      if (messages.length === 0) {
+        if (result.state === "EXCELLENT") {
+          messages.push("거의 완전한 정자세입니다.");
+        } else if (result.state === "GOOD") {
+          messages.push("자세가 준수합니다.");
+        } else if (result.state === "NORMAL") {
+          messages.push("자세가 보통 수준입니다.");
+        } else if (result.state === "BAD") {
+          messages.push("자세가 불량합니다.");
+        } else {
+          messages.push("자세가 매우 불량합니다.");
+        }
+      }
+
+      return messages.join(" ");
     }
 
     function analyzePosture() {
@@ -281,31 +369,8 @@
       const leftHip = latestPoseLandmarks[23];
       const rightHip = latestPoseLandmarks[24];
 
-      let score = 100;
-      let messages = [];
-
-      // ===============================
-      // 1. 어깨 기울기
-      // 기존 감점보다 약 20% 엄격하게 수정
-      // 살짝 기울어짐: -10 -> -12
-      // 크게 기울어짐: -25 -> -30
-      // ===============================
       const shoulderTilt = getHorizontalTiltDegree(leftShoulder, rightShoulder);
 
-      if (shoulderTilt > 16) {
-        score -= 30;
-        messages.push("어깨 기울어짐이 큽니다.");
-      } else if (shoulderTilt > 8) {
-        score -= 12;
-        messages.push("어깨가 살짝 기울어졌습니다.");
-      }
-
-      // ===============================
-      // 2. 몸 중심 기울기
-      // 기존 감점보다 약 20% 엄격하게 수정
-      // 살짝 기울어짐: -10 -> -12
-      // 크게 기울어짐: -25 -> -30
-      // ===============================
       const shoulderCenter = {
         x: (leftShoulder.x + rightShoulder.x) / 2,
         y: (leftShoulder.y + rightShoulder.y) / 2
@@ -318,20 +383,6 @@
 
       const bodyLean = Math.abs(shoulderCenter.x - hipCenter.x);
 
-      if (bodyLean > 0.11) {
-        score -= 30;
-        messages.push("상체가 한쪽으로 많이 기울었습니다.");
-      } else if (bodyLean > 0.06) {
-        score -= 12;
-        messages.push("상체가 살짝 기울었습니다.");
-      }
-
-      // ===============================
-      // 3. 머리 기울기
-      // 기존 감점보다 약 20% 엄격하게 수정
-      // 살짝 기울어짐: -8 -> -10
-      // 크게 기울어짐: -20 -> -24
-      // ===============================
       let headTilt = 0;
 
       if (latestFaceLandmarks) {
@@ -339,43 +390,30 @@
         const rightEye = latestFaceLandmarks[263];
 
         headTilt = getHorizontalTiltDegree(leftEye, rightEye);
-
-        if (headTilt > 16) {
-          score -= 24;
-          messages.push("머리가 많이 기울었습니다.");
-        } else if (headTilt > 9) {
-          score -= 10;
-          messages.push("머리가 살짝 기울었습니다.");
-        }
       }
 
-      score = Math.max(0, Math.min(100, Math.round(score)));
+      const sPenalty = shoulderPenalty(shoulderTilt);
+      const bPenalty = bodyLeanPenalty(bodyLean);
+      const hPenalty = headPenalty(headTilt);
+
+      let score = 100 - sPenalty - bPenalty - hPenalty;
+      score = clamp(Math.round(score), 0, 100);
 
       const result = classifyPosture(score);
-
-      if (messages.length === 0) {
-        if (result.state === "EXCELLENT") {
-          messages.push("자세가 매우 안정적입니다.");
-        } else if (result.state === "GOOD") {
-          messages.push("자세가 준수합니다.");
-        } else if (result.state === "NORMAL") {
-          messages.push("자세가 보통 수준입니다.");
-        } else if (result.state === "BAD") {
-          messages.push("자세가 불량합니다.");
-        } else {
-          messages.push("자세가 매우 불량합니다.");
-        }
-      }
+      const message = makeMessage(result, shoulderTilt, bodyLean, headTilt);
 
       return {
         score,
         state: result.state,
         label: result.label,
         className: result.className,
-        message: messages.join(" "),
+        message,
         shoulderTilt: shoulderTilt.toFixed(1),
         bodyLean: bodyLean.toFixed(3),
-        headTilt: headTilt.toFixed(1)
+        headTilt: headTilt.toFixed(1),
+        shoulderPenalty: sPenalty,
+        bodyPenalty: bPenalty,
+        headPenalty: hPenalty
       };
     }
 
@@ -386,9 +424,9 @@
 
       detailText.innerHTML = `
         ${result.message}<br>
-        어깨 기울기: ${result.shoulderTilt}도<br>
-        몸 중심 기울기: ${result.bodyLean}<br>
-        머리 기울기: ${result.headTilt}도
+        어깨 기울기: ${result.shoulderTilt}도 / 감점: ${result.shoulderPenalty ?? "-"}점<br>
+        몸 중심 기울기: ${result.bodyLean} / 감점: ${result.bodyPenalty ?? "-"}점<br>
+        머리 기울기: ${result.headTilt}도 / 감점: ${result.headPenalty ?? "-"}점
       `;
     }
 
