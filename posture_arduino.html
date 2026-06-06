@@ -145,6 +145,12 @@
     canvas.height = 720;
 
     // ===============================
+    // 점수 보정값
+    // 현재 계산된 점수에 +10점을 더함
+    // ===============================
+    const SCORE_BOOST = 10;
+
+    // ===============================
     // Arduino Serial 변수
     // ===============================
     let port = null;
@@ -204,12 +210,33 @@
     }
 
     // ===============================
-    // 각도 계산
+    // 일반 각도 계산
     // ===============================
     function getAngleDegree(p1, p2) {
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
       return Math.atan2(dy, dx) * 180 / Math.PI;
+    }
+
+    // ===============================
+    // 수평 기준 기울기 계산
+    // 0도와 180도 모두 수평으로 처리
+    //
+    // 예:
+    // 178.6도 -> 1.4도
+    // 175도   -> 5도
+    // 170도   -> 10도
+    // 5도     -> 5도
+    // ===============================
+    function getHorizontalTiltDegree(p1, p2) {
+      const angle = getAngleDegree(p1, p2);
+      let tilt = Math.abs(angle);
+
+      if (tilt > 90) {
+        tilt = 180 - tilt;
+      }
+
+      return tilt;
     }
 
     // ===============================
@@ -236,7 +263,7 @@
 
     // ===============================
     // 자세 분석
-    // 완화된 기준 적용 버전
+    // 180도 근처 수평 보정 + SCORE_BOOST 10 적용
     // ===============================
     function analyzePosture() {
       if (!latestPoseLandmarks) {
@@ -260,13 +287,15 @@
 
       // -------------------------------
       // 1. 어깨 기울기 측정
-      // 기존보다 완화:
+      // 수정됨:
+      // 기존 Math.abs(angle) 대신 getHorizontalTiltDegree 사용
+      // 178.6도 같은 값은 1.4도로 보정됨
+      //
       // 8도 이하 양호
       // 8~16도 살짝 틀어짐
       // 16도 초과 불량
       // -------------------------------
-      const shoulderAngle = getAngleDegree(leftShoulder, rightShoulder);
-      const shoulderTilt = Math.abs(shoulderAngle);
+      const shoulderTilt = getHorizontalTiltDegree(leftShoulder, rightShoulder);
 
       if (shoulderTilt > 16) {
         score -= 25;
@@ -278,7 +307,6 @@
 
       // -------------------------------
       // 2. 몸 중심 기울기 측정
-      // 기존보다 완화:
       // 0.06 이하 양호
       // 0.06~0.11 살짝 틀어짐
       // 0.11 초과 불량
@@ -305,7 +333,9 @@
 
       // -------------------------------
       // 3. 머리 기울기 측정
-      // 기존보다 완화:
+      // 수정됨:
+      // 눈 양끝 선도 180도 근처 수평 보정 적용
+      //
       // 9도 이하 양호
       // 9~16도 살짝 틀어짐
       // 16도 초과 불량
@@ -316,8 +346,7 @@
         const leftEye = latestFaceLandmarks[33];
         const rightEye = latestFaceLandmarks[263];
 
-        const eyeAngle = getAngleDegree(leftEye, rightEye);
-        headTilt = Math.abs(eyeAngle);
+        headTilt = getHorizontalTiltDegree(leftEye, rightEye);
 
         if (headTilt > 16) {
           score -= 20;
@@ -328,16 +357,15 @@
         }
       }
 
+      // -------------------------------
+      // 점수 보정
+      // 예: 원래 75점이면 최종 85점으로 표시
+      // -------------------------------
+      score = score + SCORE_BOOST;
       score = Math.max(0, Math.min(100, Math.round(score)));
 
       // -------------------------------
       // 최종 상태 판정
-      // 기존:
-      // GOOD 80 이상
-      // WARN 60 이상
-      // BAD 60 미만
-      //
-      // 완화 후:
       // GOOD 70 이상
       // WARN 45 이상
       // BAD 45 미만
