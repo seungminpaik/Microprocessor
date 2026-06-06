@@ -8,22 +8,15 @@
 // VERY_BAD  -> 매우 불량: 빨간 LED + 강한 경고음 + 강한 진동
 // ===============================
 
-// LED 핀
 const int GREEN_LED  = 8;
 const int YELLOW_LED = 9;
 const int RED_LED    = 10;
 
-// 부저 핀
 const int BUZZER_PIN = 11;
-
-// 모터 제어 핀
-// PWM 가능한 핀 권장: 3, 5, 6, 9, 10, 11
 const int MOTOR_PIN  = 6;
 
-// 현재 자세 상태
 String postureState = "GOOD";
 
-// 경고 타이밍 제어용
 unsigned long lastActionTime = 0;
 bool toggleState = false;
 
@@ -73,7 +66,6 @@ void loop() {
   }
 }
 
-// 매우 준수
 void setExcellent() {
   digitalWrite(GREEN_LED, HIGH);
   digitalWrite(YELLOW_LED, LOW);
@@ -83,7 +75,6 @@ void setExcellent() {
   analogWrite(MOTOR_PIN, 0);
 }
 
-// 준수
 void setGood() {
   digitalWrite(GREEN_LED, HIGH);
   digitalWrite(YELLOW_LED, LOW);
@@ -93,7 +84,6 @@ void setGood() {
   analogWrite(MOTOR_PIN, 0);
 }
 
-// 보통
 void setNormal() {
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(YELLOW_LED, HIGH);
@@ -103,7 +93,6 @@ void setNormal() {
   analogWrite(MOTOR_PIN, 0);
 }
 
-// 불량
 void setBad() {
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(YELLOW_LED, LOW);
@@ -111,7 +100,6 @@ void setBad() {
 
   unsigned long now = millis();
 
-  // 0.8초마다 약한 경고
   if (now - lastActionTime >= 800) {
     lastActionTime = now;
 
@@ -125,7 +113,6 @@ void setBad() {
   }
 }
 
-// 매우 불량
 void setVeryBad() {
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(YELLOW_LED, LOW);
@@ -133,7 +120,6 @@ void setVeryBad() {
 
   unsigned long now = millis();
 
-  // 0.25초마다 강한 경고
   if (now - lastActionTime >= 250) {
     lastActionTime = now;
     toggleState = !toggleState;
